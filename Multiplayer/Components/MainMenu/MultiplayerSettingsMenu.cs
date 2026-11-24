@@ -28,8 +28,6 @@ public class MultiplayerSettingsMenu : MonoBehaviour
     readonly Dictionary<object, Action> pendingChanges = [];
     bool showingCharacterSelector = false;
 
-    Color disabledInputColor;
-    Color enabledInputColor;
 
 
     protected void Awake()
@@ -131,41 +129,10 @@ public class MultiplayerSettingsMenu : MonoBehaviour
 
     private void BuildPlayerPrefs(RectTransform content)
     {
-        // Use steam name
-        var useSteamName = UIHelpers.CreateToggle(content, "Use Steam Name", Locale.SETTINGS_USE_STEAM_NAME_KEY, Multiplayer.Settings.UseSteamName);
-
-        // Alternate player name
-        var usernameInput = UIHelpers.CreateInputField(content, "Username", "Player", Multiplayer.Settings.Username, false, Settings.MAX_USERNAME_LENGTH);
-        var hoverImage = useSteamName.FindChildByName("[image hover]");
-        Instantiate(hoverImage, usernameInput.transform);
-
-        usernameInput.readOnly = Multiplayer.Settings.UseSteamName; // Initial read-only state
-        var hoverable = usernameInput.GetOrAddComponent<SimpleHoverable>();
-        hoverable.addEffects = true;
+        // Player name (hoverable = true makes the helper add the hover image, SimpleHoverable and tooltip component)
+        var usernameInput = UIHelpers.CreateInputField(content, "Username", "Player", Multiplayer.Settings.Username, true, Settings.MAX_USERNAME_LENGTH);
         var usernameTooltip = usernameInput.GetOrAddComponent<UIElementTooltip>();
-        usernameTooltip.hoverable = hoverable;
         usernameTooltip.enabledKey = Locale.SETTINGS_PLAYER_NAME_KEY + "__tooltip";
-
-        // Store colours and set initial styling
-        enabledInputColor = usernameInput.textComponent.color;
-        disabledInputColor = usernameInput.placeholder.color;
-        usernameInput.textComponent.color = Multiplayer.Settings.UseSteamName ? disabledInputColor : enabledInputColor;
-
-        // Listen for changes to the "Use Steam Name" toggle
-        useSteamName.onValueChanged.AddListener((value) =>
-        {
-            bool changed = value != Multiplayer.Settings.UseSteamName;
-            // update the pending changes
-            if (changed)
-                pendingChanges[useSteamName] = () => Multiplayer.Settings.UseSteamName = value;
-            else
-                pendingChanges.Remove(useSteamName);
-
-            usernameInput.readOnly = value;
-            usernameInput.textComponent.color = value ? disabledInputColor : enabledInputColor;
-
-            MarkChanged(changed, useSteamName.transform);
-        });
 
         // Listen for changes to the username input field
         usernameInput.onValueChanged.AddListener((value) =>

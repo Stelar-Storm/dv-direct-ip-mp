@@ -1,7 +1,6 @@
 using DV;
 using DV.Common;
 using DV.Localization;
-using DV.Platform.Steam;
 using DV.UI;
 using DV.UI.PresetEditors;
 using DV.UIFramework;
@@ -68,12 +67,6 @@ public class HostGamePane : MonoBehaviour
     public void Start()
     {
         Multiplayer.Log("HostGamePane Started");
-
-        if (DVSteamworks.Success)
-            return;
-
-        Multiplayer.Log($"Steam not detected, prompt for restart.");
-        MainMenuThingsAndStuff.Instance.ShowOkPopup("Steam not detected. Please restart the game with Steam running", () => { });
     }
 
     public void OnEnable()
@@ -352,9 +345,6 @@ public class HostGamePane : MonoBehaviour
         bool valid = true;
 
         if (incompatibleMods)
-            valid = false;
-
-        if (!DVSteamworks.Success)
             valid = false;
 
         if (serverName.text.Trim() == "" || serverName.text.Length > MAX_SERVER_NAME_LEN)

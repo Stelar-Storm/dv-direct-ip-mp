@@ -1,4 +1,3 @@
-using DV.Platform.Steam;
 using DV.WeatherSystem;
 using LiteNetLib.Utils;
 using LiteNetLib;
@@ -7,8 +6,6 @@ using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Packets.Unconnected;
 using Multiplayer.Utils;
 using Newtonsoft.Json;
-using Steamworks.Data;
-using Steamworks;
 using System.Collections;
 using System.Linq;
 using System.Net.NetworkInformation;
@@ -40,10 +37,6 @@ public class LobbyServerManager : MonoBehaviour
     private NetworkServer server;
     private string server_id;
     private string private_key;
-
-    //Steam Lobby
-    public static readonly string[] EXCLUDE_PARAMS = {"id", "ipv4", "ipv6", "port", "LocalIPv4", "LocalIPv6", "Ping", "Visibility", "LastSeen", "CurrentPlayers", "MaxPlayers"};
-    private Lobby? lobby;
 
     private bool initialised = false;
     private bool sendUpdates = false;
@@ -85,12 +78,6 @@ public class LobbyServerManager : MonoBehaviour
     {
         if (server == null || server.ServerData == null)
             yield break;
-
-        //Create a steam lobby
-        if (DVSteamworks.Success)
-        {
-            CreateSteamLobby();
-        }
 
         //Register with old php lobby server (provides stats and makes the lobby visible, but not joinable to users on old versions)
         server.ServerData.ipv6 = GetStaticIPv6Address();
@@ -146,10 +133,6 @@ public class LobbyServerManager : MonoBehaviour
         StopAllCoroutines();
         StartCoroutine(RemoveFromLobbyServer($"{Multiplayer.Settings.LobbyServerAddress}/{ENDPOINT_REMOVE_SERVER}"));
 
-
-        lobby?.SetJoinable(false);
-        lobby?.Leave();
-
         discoveryManager?.Stop();
     }
 
@@ -164,11 +147,6 @@ public class LobbyServerManager : MonoBehaviour
                 timePassed = 0f;
                 server.ServerData.CurrentPlayers = server.PlayerCount;
                 StartCoroutine(UpdateLobbyServer($"{Multiplayer.Settings.LobbyServerAddress}/{ENDPOINT_UPDATE_SERVER}"));
-
-                if(lobby != null)
-                {
-                    SteamworksUtils.SetLobbyData((Lobby)lobby, server.ServerData, EXCLUDE_PARAMS);
-                }
             }
         }else if (server?.ServerData?.Visibility == ServerVisibility.Private || !sendUpdates)
         {
@@ -179,46 +157,6 @@ public class LobbyServerManager : MonoBehaviour
         discoveryManager?.PollEvents();
     }
 
-    #endregion
-
-    #region Steam Lobby
-    public async void CreateSteamLobby()
-    {
-        if (server == null || server.ServerData == null)
-            return;
-
-        // Specify the lobby type (public, private, etc.)
-        var result = await SteamMatchmaking.CreateLobbyAsync(server.ServerData.MaxPlayers);
-
-        if (result.HasValue)
-        {
-            // Lobby was created successfully
-            lobby = result.Value;
-
-            server.Log("Steam Lobby created successfully!");
-            server.LogDebug(() => $"Steam lobby ID: {lobby?.Id}");
-
-            lobby?.SetData(SteamworksUtils.LOBBY_MP_MOD_KEY, SteamworksUtils.LOBBY_MP_MOD_KEY); //We'll add this in for filtering
-            lobby?.SetData(SteamworksUtils.LOBBY_NET_LOCATION_KEY, SteamNetworkingUtils.LocalPingLocation.ToString()); //for ping estimation
-
-            SteamworksUtils.SetLobbyData((Lobby)lobby, server.ServerData, EXCLUDE_PARAMS);
-
-            //Set correct visibility
-            if (server.ServerData.Visibility == ServerVisibility.Private)
-                lobby?.SetPrivate();
-            else if (server.ServerData.Visibility == ServerVisibility.Friends)
-                lobby?.SetFriendsOnly();
-            else if (server.ServerData.Visibility == ServerVisibility.Public)
-                lobby?.SetPublic();
-
-            lobby?.SetJoinable(true);
-        }
-        else
-        {
-            // Handle failure
-            server.LogError("Failed to create lobby.");
-        }
-    }
     #endregion
 
     #region Lobby Server

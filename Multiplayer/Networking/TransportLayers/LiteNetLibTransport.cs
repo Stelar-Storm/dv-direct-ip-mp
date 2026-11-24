@@ -68,12 +68,10 @@ public class LiteNetLibTransport : ITransport, INetEventListener
     public ITransportPeer Connect(string address, int port, NetDataWriter data)
     {
         var netPeer = netManager.Connect(address, port, data);
-        var peer = new LiteNetLibPeer(netPeer);
 
         //Multiplayer.LogDebug(() => $"LiteNetLibTransport.Connect length: {data.Length}. packet: {BitConverter.ToString(data.Data)}");
 
-        netPeerToPeer[netPeer] = peer;
-        return peer;
+        return GetOrCreatePeer(netPeer);
     }
 
     public void Send(ITransportPeer peer, NetDataWriter writer, DeliveryMethod deliveryMethod)
@@ -92,11 +90,7 @@ public class LiteNetLibTransport : ITransport, INetEventListener
 
     void INetEventListener.OnPeerConnected(NetPeer netPeer)
     {
-        var peer = new LiteNetLibPeer(netPeer);
-
-        netPeerToPeer[netPeer] = peer;
-
-        OnPeerConnected?.Invoke(peer);
+        OnPeerConnected?.Invoke(GetOrCreatePeer(netPeer));
     }
 
     void INetEventListener.OnPeerDisconnected(NetPeer netPeer, DisconnectInfo disconnectInfo)
@@ -164,9 +158,22 @@ public class LiteNetLibTransport : ITransport, INetEventListener
             netPeerToPeer.Remove(pair.Key);
         }
     }
-    public void RegisterPeer(NetPeer netPeer, LiteNetLibPeer peer)
+
+    /// <summary>
+    ///     Returns the single wrapper for a NetPeer, creating it on first use.
+    ///     The same instance must be handed out from Connect, Accept and OnPeerConnected:
+    ///     NetworkServer keys its peer -> player lookup by reference, so a second wrapper
+    ///     for the same NetPeer would make every post-login packet look like it came from an unknown peer.
+    /// </summary>
+    public LiteNetLibPeer GetOrCreatePeer(NetPeer netPeer)
     {
-        netPeerToPeer[netPeer] = peer;
+        if (!netPeerToPeer.TryGetValue(netPeer, out var peer))
+        {
+            peer = new LiteNetLibPeer(netPeer);
+            netPeerToPeer[netPeer] = peer;
+        }
+
+        return peer;
     }
 
 }
@@ -185,10 +192,8 @@ public class LiteNetLibConnectionRequest : IConnectionRequest
     public ITransportPeer Accept()
     {
         var netPeer = request.Accept();
-        var peer = new LiteNetLibPeer(netPeer);
-        transport.RegisterPeer(netPeer, peer);
 
-        return peer;
+        return transport.GetOrCreatePeer(netPeer);
     }
 
     public void Reject(NetDataWriter data = null)

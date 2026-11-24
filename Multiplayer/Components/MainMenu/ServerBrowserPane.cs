@@ -1,5 +1,4 @@
 using DV.Localization;
-using DV.Platform.Steam;
 using DV.UI;
 using DV.UI.Manual;
 using DV.UIFramework;
@@ -14,8 +13,6 @@ using Multiplayer.Components.Util;
 using Multiplayer.Networking.Data;
 using Multiplayer.Patches.MainMenu;
 using Multiplayer.Utils;
-using Steamworks;
-using Steamworks.Data;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -37,9 +34,6 @@ public class ServerBrowserPane : MonoBehaviour
     private enum ConnectionState
     {
         NotConnected,
-        JoiningLobby,
-        AwaitingPassword,
-        AttemptingSteamRelay,
         AttemptingIPv6,
         AttemptingIPv6Punch,
         AttemptingIPv4,
@@ -56,10 +50,6 @@ public class ServerBrowserPane : MonoBehaviour
     // Gridview variables
     private ServerBrowserGridView serverGridView;
     private IServerBrowserGameDetails selectedServer;
-
-    // Ping tracking
-    private float pingTimer = 0f;
-    private const float PING_INTERVAL = 2f; // base interval to refresh all pings
 
     // Button variables
     private ButtonDV buttonJoin;
@@ -85,17 +75,12 @@ public class ServerBrowserPane : MonoBehaviour
     // Connection parameters
     private string address;
     private int portNumber;
-    private Lobby? selectedLobby;
-    private static Lobby? joinedLobby;
-    public static Lobby? lobbyToJoin;
     string password = null;
     bool direct = false;
 
     private ConnectionState connectionState = ConnectionState.NotConnected;
     private Popup connectingPopup;
     private int attempt;
-
-    private Lobby[] lobbies;
 
     private bool incompatibleMods = true;
 
@@ -104,8 +89,6 @@ public class ServerBrowserPane : MonoBehaviour
     public void Awake()
     {
         Multiplayer.Log("MultiplayerPane Awake()");
-        joinedLobby?.Leave();
-        joinedLobby = null;
 
         CleanUI();
         BuildUI();
@@ -134,8 +117,6 @@ public class ServerBrowserPane : MonoBehaviour
 
     public void Update()
     {
-        SteamClient.RunCallbacks();
-
         //Handle server refresh interval
         timePassed += Time.deltaTime;
 
@@ -158,44 +139,6 @@ public class ServerBrowserPane : MonoBehaviour
             serverRefreshing = false;
             timePassed = 0;
         }
-
-        //Handle pinging servers
-        pingTimer += Time.deltaTime;
-
-        if (pingTimer >= PING_INTERVAL)
-        {
-            UpdatePings();
-            pingTimer = 0f;
-        }
-
-        if (lobbyToJoin != null && connectionState == ConnectionState.NotConnected)
-        {
-            //For invites/requests
-            Multiplayer.Log($"Player invite initiated/request");
-
-            if (!SteamworksUtils.IsDVMP((Lobby)lobbyToJoin))
-                return;
-
-            if (lobbyToJoin.Value.Id.IsValid)
-            {
-                direct = false;
-                var _ = JoinLobby((Lobby)lobbyToJoin);
-            }
-            else
-            {
-                Multiplayer.LogWarning("Received invalid lobby invite");
-                lobbyToJoin = null;
-            }
-        }
-    }
-
-    public void Start()
-    {
-        if (DVSteamworks.Success)
-            return;
-
-        Multiplayer.Log($"Steam not detected, prompt for restart.");
-        MainMenuThingsAndStuff.Instance.ShowOkPopup("Steam not detected. Please restart the game with Steam running", () => { });
     }
 
     private void CleanUI()
@@ -466,33 +409,15 @@ public class ServerBrowserPane : MonoBehaviour
         //buttonJoin.ToggleInteractable(false);
         buttonRefresh.ToggleInteractable(false);
 
-        if (DVSteamworks.Success)
-            ListActiveLobbies();
-
+        // There is no remote server list any more (it was backed by Steam lobbies),
+        // so there is nothing to fetch. Complete immediately so the refresh state doesn't get stuck.
+        remoteRefreshComplete = true;
     }
     private void JoinAction()
     {
-        if (selectedServer == null || connectionState != ConnectionState.NotConnected)
-            return;
-
-        buttonDirectIP.ToggleInteractable(false);
-        buttonJoin.ToggleInteractable(false);
-
-        //not making a direct connection
-        direct = false;
-        portNumber = -1;
-
-        var lobby = GetLobbyFromServer(selectedServer);
-        if (lobby != null)
-        {
-            selectedLobby = (Lobby)lobby;
-            _ = JoinLobby((Lobby)selectedLobby);
-        }
-        else
-        {
-            Multiplayer.LogWarning($"JoinAction called but lobby is null");
-            AttemptFail();
-        }
+        // Servers are joined by IP address. The list is always empty, so this button is never enabled,
+        // but if it is ever triggered fall back to the direct connection flow.
+        DirectAction();
     }
 
     private void DirectAction()
@@ -811,7 +736,8 @@ public class ServerBrowserPane : MonoBehaviour
         {
             if (result.closedBy == PopupClosedByAction.Abortion)
             {
-                ResetConnectionState();
+                // ResetConnectionState is a coroutine, calling it directly does nothing
+                StartCoroutine(ResetConnectionState());
                 buttonDirectIP.ToggleInteractable(true);
                 return;
             }
@@ -896,26 +822,13 @@ public class ServerBrowserPane : MonoBehaviour
     }
 
     #region workflow
-    private void UpdatePings()
-    {
-        UpdatePingsSteam();
-    }
-
     private void InitiateConnection()
     {
 
-        Multiplayer.Log($"Initiating connection. Direct: {direct}, Address: {address}, Lobby: {selectedLobby?.Id.ToString()}");
+        Multiplayer.Log($"Initiating connection. Direct: {direct}, Address: {address}");
 
         attempt = 0;
         ShowConnectingPopup();
-
-        if (!direct && joinedLobby != null)
-        {
-            connectionState = ConnectionState.AttemptingSteamRelay;
-            string hostId = ((Lobby)joinedLobby).Owner.Id.Value.ToString();
-            NetworkLifecycle.Instance.StartClient(hostId, -1, password, false, OnDisconnect);
-            return;
-        }
 
         Multiplayer.Log($"AttemptConnection address: {address}");
 
@@ -1040,9 +953,6 @@ public class ServerBrowserPane : MonoBehaviour
             connectingPopup = null;  // Clear the reference
         }
 
-        joinedLobby?.Leave();
-        joinedLobby = null;
-
         if (gameObject != null && gameObject.activeInHierarchy)
         {
             if (serverGridView != null)
@@ -1069,10 +979,6 @@ public class ServerBrowserPane : MonoBehaviour
             ? message
             : GetDisplayMessageForDisconnect(reason);
 
-        Multiplayer.LogDebug(() => "OnDisconnect() Leaving Lobby");
-        joinedLobby?.Leave();
-        joinedLobby = null;
-
         connectionState = ConnectionState.NotConnected;
         AttemptFail();
 
@@ -1098,74 +1004,6 @@ public class ServerBrowserPane : MonoBehaviour
     }
     #endregion
 
-
-    #region steam lobby
-    private async void ListActiveLobbies()
-    {
-        lobbies = await SteamMatchmaking.LobbyList.WithMaxResults(100)
-                                                  .FilterDistanceWorldwide()
-                                                  .WithSlotsAvailable(-1)
-                                                  //.WithKeyValue(SteamworksUtils.MP_MOD_KEY, string.Empty)
-                                                  .RequestAsync();
-
-        Multiplayer.LogDebug(() => $"ListActiveLobbies() lobbies found: {lobbies?.Count()}");
-
-        remoteServers.Clear();
-
-        if (lobbies != null)
-        {
-            var myLoc = SteamNetworkingUtils.LocalPingLocation;
-
-            foreach (var lobby in lobbies)
-            {
-                LobbyServerData server = SteamworksUtils.GetLobbyData(lobby);
-
-                server.id = lobby.Id.ToString();
-
-                server.CurrentPlayers = lobby.MemberCount;
-                server.MaxPlayers = lobby.MaxMembers;
-
-                remoteServers.Add(server);
-
-                Multiplayer.LogDebug(() => $"ListActiveLobbies() lobby {server.Name}, {lobby.MemberCount}/{lobby.MaxMembers}");
-
-            }
-        }
-        remoteRefreshComplete = true;
-    }
-
-    private void UpdatePingsSteam()
-    {
-        foreach (var server in serverGridView.Items)
-        {
-            if (server is LobbyServerData lobbyServer)
-            {
-                if (ulong.TryParse(server.id, out ulong id))
-                {
-                    Lobby? lobby = lobbies.FirstOrDefault(l => l.Id.Value == id);
-                    if (lobby != null)
-                    {
-                        string strLoc = ((Lobby)lobby).GetData(SteamworksUtils.LOBBY_NET_LOCATION_KEY);
-                        NetPingLocation? location = NetPingLocation.TryParseFromString(strLoc);
-
-                        if (location != null)
-                            server.Ping = SteamNetworkingUtils.EstimatePingTo((NetPingLocation)location) / 2; //normalise to one way ping
-                    }
-                }
-
-                UpdateElement(lobbyServer);
-            }
-        }
-    }
-
-    private Lobby? GetLobbyFromServer(IServerBrowserGameDetails server)
-    {
-        if (ulong.TryParse(server.id, out ulong id))
-            return lobbies.FirstOrDefault(l => l.Id.Value == id);
-
-        return null;
-    }
-    #endregion
 
     private void RefreshGridView()
     {
@@ -1222,55 +1060,5 @@ public class ServerBrowserPane : MonoBehaviour
         }
 
         return input;
-    }
-
-    private async Task<bool> JoinLobby(Lobby lobby)
-    {
-
-        if (connectionState != ConnectionState.NotConnected)
-        {
-            Multiplayer.LogWarning($"Cannot join lobby while in state: {connectionState}");
-            return false;
-        }
-
-        connectionState = ConnectionState.JoiningLobby;
-        Multiplayer.Log($"Attempting to join lobby ({lobby.Id})");
-
-        var joinResult = await lobby.Join();
-
-        if (joinResult == RoomEnter.Success)
-        {
-            Multiplayer.Log($"Lobby joined ({lobby.Id})");
-
-            joinedLobby = lobby;
-            lobbyToJoin = null;
-
-            string hasPass = lobby.GetData(SteamworksUtils.LOBBY_HAS_PASSWORD);
-            Multiplayer.Log($"Lobby ({lobby.Id}) has password: {hasPass}");
-
-            if (string.IsNullOrEmpty(hasPass) || hasPass == "False")
-            {
-                Multiplayer.Log($"Attempting connection...");
-                InitiateConnection();
-            }
-            else
-            {
-                connectionState = ConnectionState.AwaitingPassword;
-                Multiplayer.Log($"Prompting for password...");
-                ShowPasswordPopup();
-            }
-
-            return true;
-        }
-        else
-        {
-            Multiplayer.LogDebug(() => "JoinLobby() Leaving Lobby");
-            lobby.Leave();
-            joinedLobby = null;
-            Multiplayer.Log($"Failed to join lobby: {joinResult}");
-            AttemptFail();
-        }
-
-        return false;
     }
 }

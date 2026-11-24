@@ -3,7 +3,6 @@ using DV.UIFramework;
 using HarmonyLib;
 using Multiplayer.Components.MainMenu;
 using Multiplayer.Utils;
-using Steamworks;
 using System;
 using System.Linq;
 using UnityEngine;
@@ -93,17 +92,5 @@ public static class RightPaneController_Patch
         __instance.menuController.controlledMenus.Add(hostPane.GetComponent<UIMenu>());
         hostMenuIndex = __instance.menuController.controlledMenus.Count - 1;
         //MainMenuController_Awake_Patch.multiplayerButton.GetComponent<UIMenuRequester>().requestedMenuIndex = __instance.menuController.controlledMenus.Count - 1;
-    }
-
-    [HarmonyPatch(nameof(RightPaneController.OnEnable))]
-    [HarmonyPostfix]
-    private static void OnEnablePost(RightPaneController __instance)
-    {
-        //SteamMatchmaking.OnLobbyDataChanged += SteamworksUtils.OnLobbyDataChanged;
-        SteamMatchmaking.OnLobbyInvite += SteamworksUtils.OnLobbyInviteRequest;
-        SteamFriends.OnGameLobbyJoinRequested += SteamworksUtils.OnLobbyJoinRequest;
-
-        if (Environment.GetCommandLineArgs().Contains("+connect_lobby"))
-            __instance.StartCoroutine(SteamworksUtils.JoinFromCommandLine());
     }
 }

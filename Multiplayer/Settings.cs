@@ -21,11 +21,7 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     public int SettingsVer = CURRENT_VERSION;
 
     [Header("Player")]
-    [Draw("Use Steam Name", Tooltip = "Use your Steam name as your username in-game.")]
-    public bool UseSteamName = true;
-    public string LastSteamName = string.Empty;
-    public ulong SteamId = 0;
-    [Draw("Username", Tooltip = "Your username in-game.", VisibleOn = "UseSteamName|false")]
+    [Draw("Username", Tooltip = "Your username in-game.")]
     public string Username = "Player";
     public string Guid = System.Guid.NewGuid().ToString();
     public string CharacterId = "MP_UC";
@@ -135,7 +131,6 @@ public class Settings : UnityModManager.ModSettings, IDrawable
 
     public override void Save(UnityModManager.ModEntry modEntry)
     {
-        LastSteamName = LastSteamName.Trim().Truncate(MAX_USERNAME_LENGTH);
         Username = Username.Trim().Truncate(MAX_USERNAME_LENGTH);
 
         Port = Mathf.Clamp(Port, 1024, 49151);
@@ -165,21 +160,7 @@ public class Settings : UnityModManager.ModSettings, IDrawable
 
     public string GetUserName()
     {
-        string username = Username;
-
-        if (Multiplayer.Settings.UseSteamName)
-        {
-            if (SteamworksUtils.GetSteamUser(out string steamUsername, out ulong steamId))
-            {
-                Multiplayer.Settings.LastSteamName = steamUsername;
-                Multiplayer.Settings.SteamId = steamId;
-            }
-
-            if (Multiplayer.Settings.LastSteamName != string.Empty)
-                username = Multiplayer.Settings.LastSteamName;
-        }
-
-        return username;
+        return Username;
     }
 
     public static Settings Load(UnityModManager.ModEntry modEntry)
