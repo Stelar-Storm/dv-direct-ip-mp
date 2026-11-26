@@ -55,6 +55,9 @@ namespace Multiplayer.Networking.Managers.Server;
 
 public class NetworkServer : NetworkManager
 {
+    private const int MAX_TRAINSET_PHYSICS_PACKET_SIZE = 900;
+    private const int MAX_TRAINSET_PHYSICS_PARTS_PER_PACKET = 16;
+
     private const int WEATHER_UPDATE_INTERVAL = 30; //seconds
     private const int HIGH_PING_LOG_INTERVAL = 60; //only log high ping once every 60 seconds per player
 
@@ -598,7 +601,52 @@ public class NetworkServer : NetworkManager
     public void SendTrainsetPhysicsUpdate(ClientboundTrainsetPhysicsPacket packet, bool reliable)
     {
         //LogDebug(() => $"Sending Physics packet for netId: {packet.FirstNetId}, tick: {packet.Tick}");
-        SendPacketToAll(packet, reliable ? DeliveryMethod.ReliableOrdered : DeliveryMethod.Unreliable, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
+        DeliveryMethod deliveryMethod = reliable ? DeliveryMethod.ReliableOrdered : DeliveryMethod.Unreliable;
+        TrainsetMovementPart[] parts = packet.TrainsetParts;
+
+        if (parts.Length == 0)
+        {
+            SendPacketToAll(packet, deliveryMethod, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
+            return;
+        }
+
+        for (int start = 0; start < parts.Length;)
+        {
+            int count = Math.Min(MAX_TRAINSET_PHYSICS_PARTS_PER_PACKET, parts.Length - start);
+            ClientboundTrainsetPhysicsPacket chunk;
+
+            while (true)
+            {
+                TrainsetMovementPart[] chunkParts = new TrainsetMovementPart[count];
+                Array.Copy(parts, start, chunkParts, 0, count);
+                chunk = new ClientboundTrainsetPhysicsPacket
+                {
+                    FirstNetId = packet.FirstNetId,
+                    LastNetId = packet.LastNetId,
+                    Tick = packet.Tick,
+                    TrainsetParts = chunkParts
+                };
+
+                int packetSize = WritePacket(chunk).Length;
+                if (packetSize <= MAX_TRAINSET_PHYSICS_PACKET_SIZE)
+                    break;
+
+                if (count == 1)
+                {
+                    LogError($"Trainset physics update for {packet.FirstNetId}-{packet.LastNetId} at tick {packet.Tick} contains a part that exceeds the safe packet size ({packetSize} bytes).");
+                    return;
+                }
+
+                count = Math.Max(1, count / 2);
+            }
+
+            if (start == 0 && count == parts.Length)
+                SendPacketToAll(packet, deliveryMethod, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
+            else
+                SendPacketToAll(chunk, deliveryMethod, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
+
+            start += count;
+        }
     }
 
     public void SendBrakeState(ushort netId, float mainReservoirPressure, float brakePipePressure, float brakeCylinderPressure, float overheatPercent, float overheatReductionFactor, float temperature)
