@@ -109,6 +109,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private const float DISTANCE_TOLERANCE = 2f;
     private const float MAX_PAINT_DISTANCE_SQ = (CommsRadioPaintjob.SIGNAL_RANGE + DISTANCE_TOLERANCE) * (CommsRadioPaintjob.SIGNAL_RANGE + DISTANCE_TOLERANCE);
     private const float POSITION_UPDATE_THRESHOLD = 0.1f; // TrainCar must have a bigger delta to apply position update
+    private const float CLIENT_POSITION_CORRECTION_DURATION = 0.25f;
     private const float INTERIOR_CONTROLS_TIMEOUT = 2f;
     private const float IN_USE_THRESHOLD = 10 * 60f; // 10 minutes for in use to expire
 
@@ -230,6 +231,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     public TickedQueue<RigidbodySnapshot> Client_trainRigidbodyQueue;
     public TickedQueue<BogieData> client_bogie1Queue;
     public TickedQueue<BogieData> client_bogie2Queue;
+    private Coroutine clientPositionCorrection;
 
     // Player tracking
     private readonly HashSet<NetworkedPlayer> networkedPlayersInCar = [];
@@ -2091,6 +2093,8 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         if (!Client_Initialized || TrainCar.rb == null)
             return;
 
+        StopClientPositionCorrection();
+
         wasKinematicBeforeHardCorrection = TrainCar.rb.isKinematic;
 
         TrainCar.rb.isKinematic = true;
@@ -2183,7 +2187,8 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
                 {
                     if (TrainCar.rb != null)
                     {
-                        TrainCar.rb.MovePosition(worldPos);
+                        StopClientPositionCorrection();
+                        clientPositionCorrection = StartCoroutine(Client_SmoothPositionCorrection(worldPos - TrainCar.rb.position));
 
                         //TrainCar.rb.MoveRotation(movementPart.Rotation); // removed due to motion sickness issues
                     }
@@ -2216,6 +2221,39 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             kinematicCycles = 0;
             TrainCar.rb.isKinematic = kinematic;
         }
+    }
+
+    private IEnumerator Client_SmoothPositionCorrection(Vector3 correction)
+    {
+        float elapsed = 0f;
+        float appliedFraction = 0f;
+
+        while (elapsed < CLIENT_POSITION_CORRECTION_DURATION)
+        {
+            yield return new WaitForFixedUpdate();
+
+            if (TrainCar.rb == null)
+            {
+                clientPositionCorrection = null;
+                yield break;
+            }
+
+            elapsed += Time.fixedDeltaTime;
+            float fraction = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / CLIENT_POSITION_CORRECTION_DURATION));
+            TrainCar.rb.MovePosition(TrainCar.rb.position + correction * (fraction - appliedFraction));
+            appliedFraction = fraction;
+        }
+
+        clientPositionCorrection = null;
+    }
+
+    private void StopClientPositionCorrection()
+    {
+        if (clientPositionCorrection == null)
+            return;
+
+        StopCoroutine(clientPositionCorrection);
+        clientPositionCorrection = null;
     }
 
     public void Client_ReceiveBrakeStateUpdate(ClientboundBrakeStateUpdatePacket packet)
